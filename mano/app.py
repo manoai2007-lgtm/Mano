@@ -39,4 +39,10 @@ def create_app(database: str | None = None, testing: bool = False) -> Flask:
 
 
 if __name__ == "__main__":
-    create_app().run(host="127.0.0.1", port=8000, debug=True)
+    # The Werkzeug debugger gives an interactive Python console to anyone who can
+    # trigger an exception, so it stays off unless explicitly requested.
+    create_app().run(
+        host="127.0.0.1",
+        port=8000,
+        debug=os.environ.get("MANO_DEBUG", "").lower() in {"1", "true", "yes"},
+    )

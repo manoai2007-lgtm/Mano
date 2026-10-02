@@ -33,12 +33,16 @@ def require_auth(fn: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
-@api.post("/login")
+@api.route("/login", methods=["POST"])
 def login() -> tuple[Response, int] | Response:
     """Return a bearer token, or a 400/401 error for missing/invalid credentials."""
     data = request.get_json(silent=True) or {}
     username = data.get("username")
     password = data.get("password")
+    # The payload is untrusted: a JSON number or list passes a truthiness check
+    # but explodes downstream with an AttributeError.
+    if not isinstance(username, str) or not isinstance(password, str):
+        return jsonify(error="username and password must be strings"), 400
     if not username or not password:
         return jsonify(error="username and password required"), 400
 
@@ -48,19 +52,22 @@ def login() -> tuple[Response, int] | Response:
     if row is None or not verify_password(password, row["password_hash"]):
         return jsonify(error="invalid credentials"), 401
 
-    return jsonify(token=issue_token(username))
+    resp: Response = jsonify(token=issue_token(username))
+    return resp
 
 
-@api.post("/register")
+@api.route("/register", methods=["POST"])
 def register() -> tuple[Response, int] | Response:
     """Create a user and return its ID, or a 400/409 validation/conflict error."""
     data = request.get_json(silent=True) or {}
     username = data.get("username")
     password = data.get("password")
 
-    if not USERNAME_RE.match(username or ""):
+    if not isinstance(username, str) or not isinstance(password, str):
+        return jsonify(error="username and password must be strings"), 400
+    if not USERNAME_RE.match(username):
         return jsonify(error="username must be 3-32 chars, lowercase/digits/underscore"), 400
-    if not password or len(password) < 8:
+    if len(password) < 8:
         return jsonify(error="password must be at least 8 characters"), 400
 
     db = get_db()
@@ -77,15 +84,16 @@ def register() -> tuple[Response, int] | Response:
     return jsonify(id=new_id), 201
 
 
-@api.get("/users")
+@api.route("/users", methods=["GET"])
 @require_auth
 def list_users() -> Response:
     """Return all users with their IDs and creation times, excluding hashes."""
     rows = get_db().execute("SELECT id, username, created_at FROM users").fetchall()
-    return jsonify([dict(r) for r in rows])
+    resp: Response = jsonify([dict(r) for r in rows])
+    return resp
 
 
-@api.get("/users/<username>")
+@api.route("/users/<username>", methods=["GET"])
 @require_auth
 def get_user(username: str) -> tuple[Response, int] | Response:
     """Return public details for the named user, or HTTP 404 if absent."""
@@ -94,10 +102,11 @@ def get_user(username: str) -> tuple[Response, int] | Response:
     ).fetchone()
     if row is None:
         return jsonify(error="no such user"), 404
-    return jsonify(dict(row))
+    resp: Response = jsonify(dict(row))
+    return resp
 
 
-@api.delete("/users/<username>")
+@api.route("/users/<username>", methods=["DELETE"])
 @require_auth
 def delete_user(username: str) -> tuple[Response, int] | Response:
     """Delete the named user if it matches the token identity; otherwise return 403."""
@@ -106,4 +115,5 @@ def delete_user(username: str) -> tuple[Response, int] | Response:
     db = get_db()
     db.execute("DELETE FROM users WHERE username = ?", (username,))
     db.commit()
-    return jsonify(deleted=username)
+    resp: Response = jsonify(deleted=username)
+    return resp

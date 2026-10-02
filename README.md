@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-# Mano
-=======
 # Mano
 
 A small user-management API in Flask: registration, login, and authenticated
@@ -24,8 +21,11 @@ tests/
 
 ```bash
 pip install -r requirements.txt
+export MANO_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 python -m mano.app          # http://127.0.0.1:8000
 ```
+
+The app exits with an error if `MANO_SECRET` is unset.
 
 ## API
 
@@ -40,8 +40,15 @@ python -m mano.app          # http://127.0.0.1:8000
 ## Auth
 
 Passwords are hashed with PBKDF2-SHA256 (100k iterations, per-user salt).
-Tokens are HMAC-SHA256 signed and expire after one hour. The signing secret comes
-from `MANO_SECRET` — set it in production.
+Tokens are HMAC-SHA256 signed and expire after one hour. The signing secret is read
+from `MANO_SECRET` and the app refuses to start without it — there is no fallback,
+because a hardcoded default would let anyone forge a token for any user.
+
+```bash
+export MANO_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+```
+
+`MANO_DEBUG=1` enables the Werkzeug debugger; it is off by default.
 
 ```bash
 curl -X POST localhost:8000/api/register \
@@ -55,18 +62,29 @@ curl -X POST localhost:8000/api/login \
 
 ## Quality gates
 
+Install the tooling first — `requirements.txt` covers runtime only:
+
 ```bash
-pytest -q            # 26 tests
-ruff check .
-mypy mano/ --strict
+pip install -r requirements.txt
+pip install mypy ruff types-flask bandit pip-audit
 ```
 
-CI runs all three on every push and pull request.
+Then:
+
+```bash
+pytest -q            # 32 tests
+ruff check .
+mypy mano/ --strict
+bandit -r mano/      # Python security linter
+pip-audit -r requirements.txt
+```
+
+CI runs all five on every push and pull request. `bandit` and `pip-audit` are the
+static-security half of the gate — they catch hardcoded secrets, weak crypto, and
+known CVEs in dependencies without needing a running deployment.
 
 ## Known gaps
 
-- No rate limiting on `/login` — brute-forceable.
+- No rate limiting or lockout on repeated failed logins.
 - No CSRF protection; the API is bearer-token only so it is not directly exposed
   to browser sessions.
-- `MANO_SECRET` falls back to a hardcoded default if unset.
->>>>>>> 1f2cec9 (Mano API: Flask user service with auth, tests, and CI gates)

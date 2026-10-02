@@ -10,7 +10,32 @@ import secrets
 import time
 
 TOKEN_TTL_SECONDS = 3600
-_SECRET = os.environ.get("MANO_SECRET", "insecure-default-secret")
+
+
+def _load_secret() -> str:
+    """Read MANO_SECRET, refusing to fall back to a known value.
+
+    A hardcoded default would be public knowledge, so anyone could forge a valid
+    token for any username. Fail loudly at startup instead.
+    """
+    secret = os.environ.get("MANO_SECRET", "").strip()
+    if not secret:
+        raise RuntimeError(
+            "MANO_SECRET is not set. Generate one with: "
+            "python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+        )
+    return secret
+
+
+_SECRET: str | None = None
+
+
+def _signing_key() -> str:
+    """Lazily resolve the signing secret so importing this module stays cheap."""
+    global _SECRET
+    if _SECRET is None:
+        _SECRET = _load_secret()
+    return _SECRET
 
 
 def hash_password(password: str) -> str:
@@ -33,7 +58,7 @@ def issue_token(username: str) -> str:
     """Return `<username>.<expiry>.<signature>`."""
     expiry = str(int(time.time()) + TOKEN_TTL_SECONDS)
     payload = f"{username}.{expiry}"
-    sig = hmac.new(_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    sig = hmac.new(_signing_key().encode(), payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}.{sig}"
 
 
@@ -44,7 +69,7 @@ def validate_token(token: str) -> str | None:
     except ValueError:
         return None
     payload = f"{username}.{expiry}"
-    expected = hmac.new(_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    expected = hmac.new(_signing_key().encode(), payload.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expected):
         return None
     if int(expiry) < int(time.time()):

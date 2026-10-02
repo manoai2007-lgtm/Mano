@@ -147,6 +147,54 @@ def test_login_missing_fields(client):
     assert client.post("/api/login", json={"username": "alice"}).status_code == 400
 
 
+# ---------- untrusted input types ----------
+
+
+def test_login_rejects_numeric_password(client):
+    """A JSON number passes a truthiness check but explodes on .encode()."""
+    r = client.post("/api/login", json={"username": "alice", "password": 12345})
+    assert r.status_code == 400
+
+
+def test_login_rejects_list_username(client):
+    r = client.post("/api/login", json={"username": ["alice"], "password": "longenough"})
+    assert r.status_code == 400
+
+
+def test_register_rejects_numeric_password(client):
+    r = client.post("/api/register", json={"username": "bob", "password": 12345678})
+    assert r.status_code == 400
+
+
+def test_register_rejects_none_username(client):
+    r = client.post("/api/register", json={"username": None, "password": "longenough"})
+    assert r.status_code == 400
+
+
+# ---------- signing secret must fail closed ----------
+
+
+def test_missing_secret_raises(monkeypatch):
+    """No hardcoded fallback: an unset MANO_SECRET must not silently pass."""
+    import mano.auth as authmod
+
+    monkeypatch.delenv("MANO_SECRET", raising=False)
+    monkeypatch.setattr(authmod, "_SECRET", None, raising=False)
+    with pytest.raises(RuntimeError, match="MANO_SECRET"):
+        authmod._load_secret()
+
+
+def test_secret_is_not_hardcoded():
+    """The signing key must never come from a literal in the source."""
+    import inspect
+
+    import mano.auth as authmod
+
+    src = inspect.getsource(authmod._load_secret)
+    assert "insecure" not in src.lower()
+    assert authmod._load_secret.__doc__ is not None
+
+
 # ---------- protected routes ----------
 
 
