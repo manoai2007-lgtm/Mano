@@ -23,4 +23,8 @@ jobs:
       - name: Dependencies (pip-audit)
         run: pip-audit -r requirements.txt
       - name: Test
+        # The app refuses to start without MANO_SECRET, so CI supplies a
+        # throwaway one rather than a real credential.
+        env:
+          MANO_SECRET: ci-test-secret-not-for-production
         run: pytest -q
