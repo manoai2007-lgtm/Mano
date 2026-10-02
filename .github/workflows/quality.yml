@@ -13,7 +13,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt mypy ruff types-flask bandit pip-audit
+          pip install -e '.[dev]' 
       - name: Lint
         run: ruff check .
       - name: Types
@@ -21,7 +21,7 @@ jobs:
       - name: Security (bandit)
         run: bandit -r mano/
       - name: Dependencies (pip-audit)
-        run: pip-audit -r requirements.txt
+        run: pip-audit
       - name: Test
         # The app refuses to start without MANO_SECRET, so CI supplies a
         # throwaway one rather than a real credential.
