@@ -1,0 +1,10 @@
+*.db
+*.sqlite3
+.env
+.venv/
+__pycache__/
+*.pem
+*.key
+secrets/
+**/config.local.*
+token*.txt
