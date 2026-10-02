@@ -61,29 +61,35 @@ def test_password_verify_rejects_malformed_hash():
 
 
 def test_token_roundtrip():
-    """Recover the username from a freshly issued token."""
-    tok = issue_token("alice")
-    assert validate_token(tok) == "alice"
+    """Recover the account id and username from a freshly issued token."""
+    tok = issue_token("alice", 1)
+    assert validate_token(tok) == (1, "alice")
+
+
+def test_token_carries_account_id():
+    """The id must survive the round-trip: it is what revokes the token on delete."""
+    assert validate_token(issue_token("alice", 42)) == (42, "alice")
 
 
 def test_token_rejects_tampered_signature():
     """Reject a token whose signature was replaced."""
-    tok = issue_token("alice")
-    user, exp, _ = tok.split(".")
-    assert validate_token(f"{user}.{exp}.deadbeef") is None
+    tok = issue_token("alice", 1)
+    acct, user, exp, _ = tok.split(".")
+    assert validate_token(f"{acct}.{user}.{exp}.deadbeef") is None
 
 
 def test_token_rejects_malformed():
-    """Reject tokens that do not contain all three components."""
+    """Reject tokens that do not contain all four components."""
     assert validate_token("garbage") is None
     assert validate_token("a.b") is None
+    assert validate_token("1.alice.999.deadbeef") is None
 
 
 def test_token_rejects_expired(monkeypatch):
     """Reject a token after advancing the clock beyond its lifetime."""
     import mano.auth as authmod
 
-    tok = authmod.issue_token("alice")
+    tok = authmod.issue_token("alice", 1)
     real_time = authmod.time.time
     monkeypatch.setattr(authmod.time, "time", lambda: real_time() + authmod.TOKEN_TTL_SECONDS + 10)
     assert authmod.validate_token(tok) is None
@@ -206,6 +212,13 @@ def _auth(client, username="alice"):
     return {"Authorization": f"Bearer {tok}"}
 
 
+def _login_token(client, username="alice", password="correct-horse"):
+    """Return a raw bearer token so one test can reuse it across requests."""
+    return client.post(
+        "/api/login", json={"username": username, "password": password}
+    ).get_json()["token"]
+
+
 def test_list_users_requires_auth(client):
     """Reject a user listing request without authorization."""
     assert client.get("/api/users").status_code == 401
@@ -254,10 +267,8 @@ def test_delete_own_user(client):
 def test_delete_other_user_forbidden(client):
     """Reject an authenticated attempt to delete another user."""
     client.post("/api/register", json={"username": "bob", "password": "longenough"})
-    bob = client.post("/api/login", json={"username": "bob", "password": "longenough"}).get_json()
-    r = client.delete(
-        "/api/users/alice", headers={"Authorization": f"Bearer {bob['token']}"}
-    )
+    bob_token = _login_token(client, "bob", "longenough")
+    r = client.delete("/api/users/alice", headers={"Authorization": f"Bearer {bob_token}"})
     assert r.status_code == 403
 
 
@@ -265,3 +276,45 @@ def test_404_handler_shape(client):
     """Return a JSON error for an unknown API route."""
     r = client.get("/api/does-not-exist")
     assert r.status_code == 404 and "error" in r.get_json()
+
+
+# ---------- token revocation on account deletion ----------
+
+
+def test_token_stops_working_after_delete(client):
+    """A live token must not authenticate once its account is gone."""
+    token = _login_token(client, "alice")
+    auth = {"Authorization": f"Bearer {token}"}
+    assert client.get("/api/users", headers=auth).status_code == 200
+
+    assert client.delete("/api/users/alice", headers=auth).status_code == 200
+
+    after = client.get("/api/users", headers=auth)
+    assert after.status_code == 401
+
+
+def test_old_token_cannot_delete_recreated_account(client):
+    """Reusing a username must not let a stale token act on the new account."""
+    old_token = _login_token(client, "alice")
+    client.delete("/api/users/alice", headers={"Authorization": f"Bearer {old_token}"})
+
+    assert client.post(
+        "/api/register", json={"username": "alice", "password": "correct-horse"}
+    ).status_code == 201
+
+    # The stale token is well-formed and unexpired, but its id no longer exists.
+    stale = client.get("/api/users", headers={"Authorization": f"Bearer {old_token}"})
+    assert stale.status_code == 401
+
+    fresh_token = _login_token(client, "alice")
+    r = client.delete("/api/users/alice", headers={"Authorization": f"Bearer {fresh_token}"})
+    assert r.status_code == 200
+
+
+def test_token_for_missing_id_is_rejected(client):
+    """A well-signed token naming an id that was never issued stays invalid."""
+    from mano.auth import issue_token
+
+    forged = issue_token("alice", 999999)
+    r = client.get("/api/users", headers={"Authorization": f"Bearer {forged}"})
+    assert r.status_code == 401

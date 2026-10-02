@@ -16,7 +16,13 @@ USERNAME_RE = re.compile(r"^[a-z0-9_]{3,32}$")
 
 
 def require_auth(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """Reject the request unless it carries a valid bearer token."""
+    """Reject the request unless it carries a valid bearer token for a live account.
+
+    A signature check alone is not enough: a token outlives its account, so the
+    id inside the token is looked up on every request. Deleting the row revokes
+    the token immediately, and a username reused later cannot inherit an old
+    token because the ids differ.
+    """
 
     @wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -24,10 +30,20 @@ def require_auth(fn: Callable[..., Any]) -> Callable[..., Any]:
         header = request.headers.get("Authorization", "")
         if not header.startswith("Bearer "):
             return jsonify(error="unauthorized"), 401
-        username = validate_token(header[7:])
-        if username is None:
+        claims = validate_token(header[7:])
+        if claims is None:
             return jsonify(error="invalid token"), 401
+        account_id, username = claims
+
+        row = get_db().execute(
+            "SELECT id, username FROM users WHERE id = ?", (account_id,)
+        ).fetchone()
+        if row is None or row["username"] != username:
+            # Account was deleted, or the username was reassigned to a new id.
+            return jsonify(error="token no longer valid"), 401
+
         g.current_user = username
+        g.current_user_id = account_id
         return fn(*args, **kwargs)
 
     return wrapper
@@ -52,7 +68,7 @@ def login() -> tuple[Response, int] | Response:
     if row is None or not verify_password(password, row["password_hash"]):
         return jsonify(error="invalid credentials"), 401
 
-    resp: Response = jsonify(token=issue_token(username))
+    resp: Response = jsonify(token=issue_token(username, row["id"]))
     return resp
 
 
@@ -113,7 +129,9 @@ def delete_user(username: str) -> tuple[Response, int] | Response:
     if username != g.get("current_user"):
         return jsonify(error="cannot delete another user"), 403
     db = get_db()
-    db.execute("DELETE FROM users WHERE username = ?", (username,))
+    # Delete by immutable id, not username: require_auth already proved the
+    # row behind this token is the one the caller owns.
+    db.execute("DELETE FROM users WHERE id = ?", (g.get("current_user_id"),))
     db.commit()
     resp: Response = jsonify(deleted=username)
     return resp

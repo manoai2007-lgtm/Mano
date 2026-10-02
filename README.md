@@ -40,9 +40,14 @@ The app exits with an error if `MANO_SECRET` is unset.
 ## Auth
 
 Passwords are hashed with PBKDF2-SHA256 (100k iterations, per-user salt).
-Tokens are HMAC-SHA256 signed and expire after one hour. The signing secret is read
-from `MANO_SECRET` and the app refuses to start without it — there is no fallback,
-because a hardcoded default would let anyone forge a token for any user.
+Tokens are HMAC-SHA256 signed and expire after one hour. Each token carries the
+account's immutable id, and `require_auth` looks that id up on every request —
+so deleting an account revokes its tokens immediately, and a username reused
+later cannot inherit a stale token.
+
+The signing secret is read from `MANO_SECRET` and the app refuses to start
+without it — there is no fallback, because a hardcoded default would let anyone
+forge a token for any user.
 
 ```bash
 export MANO_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
@@ -72,7 +77,7 @@ pip install mypy ruff types-flask bandit pip-audit
 Then:
 
 ```bash
-pytest -q            # 32 tests
+pytest -q            # 36 tests
 ruff check .
 mypy mano/ --strict
 bandit -r mano/      # Python security linter

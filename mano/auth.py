@@ -54,24 +54,30 @@ def verify_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(digest.hex(), expected)
 
 
-def issue_token(username: str) -> str:
-    """Return `<username>.<expiry>.<signature>`."""
+def issue_token(username: str, account_id: int) -> str:
+    """Return `<account_id>.<username>.<expiry>.<signature>`.
+
+    The token carries the immutable account id, not just the username, so a
+    token minted for a deleted account cannot be replayed against a new account
+    that later reuses the same username.
+    """
     expiry = str(int(time.time()) + TOKEN_TTL_SECONDS)
-    payload = f"{username}.{expiry}"
+    payload = f"{account_id}.{username}.{expiry}"
     sig = hmac.new(_signing_key().encode(), payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}.{sig}"
 
 
-def validate_token(token: str) -> str | None:
-    """Return the username if the token is valid and unexpired, else None."""
+def validate_token(token: str) -> tuple[int, str] | None:
+    """Return `(account_id, username)` when valid and unexpired, else None."""
     try:
-        username, expiry, sig = token.split(".")
+        account_id, username, expiry, sig = token.split(".")
+        int(account_id)
     except ValueError:
         return None
-    payload = f"{username}.{expiry}"
+    payload = f"{account_id}.{username}.{expiry}"
     expected = hmac.new(_signing_key().encode(), payload.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expected):
         return None
     if int(expiry) < int(time.time()):
         return None
-    return username
+    return int(account_id), username
