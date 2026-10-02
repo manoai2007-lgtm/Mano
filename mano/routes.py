@@ -20,6 +20,7 @@ def require_auth(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
+        """Validate the bearer token, set the current user, and call the route."""
         header = request.headers.get("Authorization", "")
         if not header.startswith("Bearer "):
             return jsonify(error="unauthorized"), 401
@@ -34,6 +35,7 @@ def require_auth(fn: Callable[..., Any]) -> Callable[..., Any]:
 
 @api.post("/login")
 def login() -> tuple[Response, int] | Response:
+    """Return a bearer token, or a 400/401 error for missing/invalid credentials."""
     data = request.get_json(silent=True) or {}
     username = data.get("username")
     password = data.get("password")
@@ -51,6 +53,7 @@ def login() -> tuple[Response, int] | Response:
 
 @api.post("/register")
 def register() -> tuple[Response, int] | Response:
+    """Create a user and return its ID, or a 400/409 validation/conflict error."""
     data = request.get_json(silent=True) or {}
     username = data.get("username")
     password = data.get("password")
@@ -77,6 +80,7 @@ def register() -> tuple[Response, int] | Response:
 @api.get("/users")
 @require_auth
 def list_users() -> Response:
+    """Return all users with their IDs and creation times, excluding hashes."""
     rows = get_db().execute("SELECT id, username, created_at FROM users").fetchall()
     return jsonify([dict(r) for r in rows])
 
@@ -84,6 +88,7 @@ def list_users() -> Response:
 @api.get("/users/<username>")
 @require_auth
 def get_user(username: str) -> tuple[Response, int] | Response:
+    """Return public details for the named user, or HTTP 404 if absent."""
     row = get_db().execute(
         "SELECT id, username, created_at FROM users WHERE username = ?", (username,)
     ).fetchone()
@@ -95,6 +100,7 @@ def get_user(username: str) -> tuple[Response, int] | Response:
 @api.delete("/users/<username>")
 @require_auth
 def delete_user(username: str) -> tuple[Response, int] | Response:
+    """Delete the named user if it matches the token identity; otherwise return 403."""
     if username != g.get("current_user"):
         return jsonify(error="cannot delete another user"), 403
     db = get_db()

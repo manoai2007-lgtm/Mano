@@ -23,12 +23,14 @@ def create_app(database: str | None = None, testing: bool = False) -> Flask:
 
     @app.teardown_appcontext
     def close_db(_exc: object = None) -> None:
+        """Close and remove the SQLite connection when the app context ends."""
         db: Any = g.pop("db", None)
         if db is not None:
             db.close()
 
     @app.errorhandler(404)
     def not_found(_e: object) -> tuple[Response, int]:
+        """Return a JSON error with HTTP 404 for an unknown route."""
         return jsonify(error="not found"), 404
 
     with app.app_context():
